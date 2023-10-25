@@ -159,6 +159,7 @@ typedef MMKVRecoverStrategic (*ErrorHandler)(const std::string &mmapID, MMKVErro
 typedef void (*ContentChangeHandler)(const std::string &mmapID);
 
 extern size_t DEFAULT_MMAP_SIZE;
+extern bool enableIncreaseCRC;
 #define DEFAULT_MMAP_ID "mmkv.default"
 
 class MMBuffer;

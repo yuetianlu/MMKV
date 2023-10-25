@@ -61,6 +61,7 @@ ThreadLock *g_instanceLock;
 MMKVPath_t g_rootDir;
 static mmkv::ErrorHandler g_errorHandler;
 size_t mmkv::DEFAULT_MMAP_SIZE;
+bool mmkv::enableIncreaseCRC;
 
 #ifndef MMKV_WIN32
 constexpr auto SPECIAL_CHARACTER_DIRECTORY_NAME = "specialCharacter";
@@ -114,7 +115,7 @@ MMKV::MMKV(const string &mmapID, MMKVMode mode, string *cryptKey, MMKVPath_t *ro
     m_lock->initialize();
     m_sharedProcessLock->m_enable = m_isInterProcess;
     m_exclusiveProcessLock->m_enable = m_isInterProcess;
-
+    m_enableIncreaseCRC = mmkv::enableIncreaseCRC;
     // sensitive zone
     {
         SCOPED_LOCK(m_sharedProcessLock);
@@ -310,6 +311,10 @@ void MMKV::clearMemoryCache() {
     // m_metaFile->clearMemoryCache();
     m_actualSize = 0;
     m_metaInfo->m_crcDigest = 0;
+    if (m_enableIncreaseCRC) {
+        m_metaInfo->m_lastCheckedCRCMetaInfo.lastActualSize = 0;
+        m_metaInfo->m_lastCheckedCRCMetaInfo.lastCRCDigest = 0;
+    }
 }
 
 void MMKV::close() {
@@ -328,6 +333,9 @@ void MMKV::close() {
     delete this;
 }
 
+void MMKV::setEnableIncreaseCRC(bool enable) {
+    mmkv::enableIncreaseCRC = enable;
+}
 #ifndef MMKV_DISABLE_CRYPT
 
 string MMKV::cryptKey() const {
@@ -389,6 +397,11 @@ bool MMKV::isFileValid() {
 bool MMKV::checkFileCRCValid(size_t actualSize, uint32_t crcDigest) {
     auto ptr = (uint8_t *) m_file->getMemory();
     if (ptr) {
+        if (m_enableIncreaseCRC) {
+            if (checkFileIncreaseCRCValid(crcDigest, actualSize)) {
+                return true;
+            }
+        }
         m_crcDigest = (uint32_t) CRC32(0, (const uint8_t *) ptr + Fixed32Size, (uint32_t) actualSize);
 
         if (m_crcDigest == crcDigest) {
@@ -417,6 +430,34 @@ void MMKV::updateCRCDigest(const uint8_t *ptr, size_t length) {
     writeActualSize(m_actualSize, m_crcDigest, nullptr, KeepSequence);
 }
 
+
+// 增量crc
+bool MMKV::checkFileIncreaseCRCValid(uint32_t crcDigest, size_t actualSize) {
+    if (!m_enableIncreaseCRC) {
+        return false;
+    }
+    auto info = m_metaInfo->m_lastCheckedCRCMetaInfo;
+    if (info.lastCRCDigest > 0 && info.lastActualSize > 0 && info.lastActualSize <= actualSize) {
+        auto ptr = (uint8_t *) m_file->getMemory() + Fixed32Size + info.lastActualSize;
+        if (ptr == nullptr) {
+            return false;
+        }
+        m_crcDigest = (uint32_t) CRC32(info.lastCRCDigest, ptr, (uint32_t)(actualSize - info.lastActualSize));
+        if (m_crcDigest == crcDigest) {
+            auto calculateSize = actualSize - info.lastActualSize;
+            MMKVInfo("check increase crc success, calculatecrc == m_crc:[%s],  lastCheckedSize:%u, calculateSize:%u", m_mmapID.c_str(), info.lastActualSize, calculateSize);
+            return true;
+        }
+        MMKVInfo("check increase crc faild0, calculatecrc != m_crc:[%s], m_crc:[%u], actualSize:[%u], lastcrc:[%u], lastActualSize:[%u], calculatecrc:[%u]", m_mmapID.c_str(), crcDigest, actualSize, info.lastCRCDigest, info.lastActualSize, m_crcDigest);
+        return false;
+    }
+    if (info.lastCRCDigest == 0 && info.lastActualSize == 0) {
+        MMKVInfo("check increase crc, last checked info is zero,[%s]", m_mmapID.c_str());
+    } else {
+        MMKVInfo("check increase crc faild1, lastActualSize greater than actualSize:[%s], m_crc:[%u], actualSize:[%u], lastcrc:[%u], lastActualSize:[%u]", m_mmapID.c_str(), crcDigest, actualSize, info.lastCRCDigest, info.lastActualSize);
+    }
+    return false;
+}
 // set & get
 
 bool MMKV::set(bool value, MMKVKey_t key) {
@@ -1123,8 +1164,12 @@ void MMKV::sync(SyncFlag flag) {
     }
     SCOPED_LOCK(m_exclusiveProcessLock);
 
-    m_file->msync(flag);
-    m_metaFile->msync(flag);
+    bool isFileSyncSuccess = m_file->msync(flag);
+    bool isMetaFileSyncSuccess = m_metaFile->msync(flag);
+    
+    if (m_enableIncreaseCRC && flag == MMKV_SYNC && isFileSyncSuccess && isMetaFileSyncSuccess) {
+        updateLastCheckedCRC(m_crcDigest, m_actualSize);
+    }
 }
 
 void MMKV::lock() {

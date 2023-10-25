@@ -39,6 +39,7 @@ static NSMutableDictionary *g_instanceDic = nil;
 static mmkv::ThreadLock *g_lock;
 static id<MMKVHandler> g_callbackHandler = nil;
 static bool g_isLogRedirecting = false;
+static bool g_enableIncreaseCRC = false;
 static NSString *g_basePath = nil;
 static NSString *g_groupPath = nil;
 
@@ -267,6 +268,11 @@ static BOOL g_hasCalledInitializeMMKV = NO;
 
 - (NSString *)mmapID {
     return m_mmapID;
+}
+
++ (void)setEnableIncreaseCRC:(bool)enable {
+    g_enableIncreaseCRC = enable;
+    mmkv::MMKV::setEnableIncreaseCRC(enable);
 }
 
 #pragma mark - Application state

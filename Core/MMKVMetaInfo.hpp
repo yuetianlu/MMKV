@@ -63,6 +63,12 @@ struct MMKVMetaInfo {
         uint32_t lastCRCDigest = 0;
         uint32_t _reserved[16] = {};
     } m_lastConfirmedMetaInfo;
+    
+    // increase CRC, last checked CRC
+    struct {
+        uint32_t lastActualSize = 0;
+        uint32_t lastCRCDigest = 0;
+    } m_lastCheckedCRCMetaInfo;
 
     uint64_t m_flags = 0;
 
@@ -85,6 +91,13 @@ struct MMKVMetaInfo {
         other->m_actualSize = m_actualSize;
     }
 
+    void writeLastCheckedCRCAndActualSizeOnly(void *ptr) const {
+        MMKV_ASSERT(ptr);
+        auto other = (MMKVMetaInfo *) ptr;
+        other->m_lastCheckedCRCMetaInfo.lastCRCDigest = m_lastCheckedCRCMetaInfo.lastCRCDigest;
+        other->m_lastCheckedCRCMetaInfo.lastActualSize = m_lastCheckedCRCMetaInfo.lastActualSize;;
+    }
+    
     void read(const void *ptr) {
         MMKV_ASSERT(ptr);
         memcpy(this, ptr, sizeof(MMKVMetaInfo));

@@ -111,6 +111,7 @@ void MMKV::loadFromFile() {
             if (needFullWriteback) {
                 fullWriteback();
             }
+            updateLastCheckedCRC(m_crcDigest, m_actualSize);
         } else {
             // file not valid or empty, discard everything
             SCOPED_LOCK(m_exclusiveProcessLock);
@@ -122,6 +123,7 @@ void MMKV::loadFromFile() {
             } else {
                 writeActualSize(0, 0, nullptr, KeepSequence);
             }
+            updateLastCheckedCRC(0, 0);
         }
         auto count = m_crypter ? m_dicCrypt->size() : m_dic->size();
         MMKVInfo("loaded [%s] with %zu key-values", m_mmapID.c_str(), count);
@@ -461,6 +463,29 @@ void MMKV::oldStyleWriteActualSize(size_t actualSize) {
     }
 #endif
     memcpy(m_file->getMemory(), &actualSize, Fixed32Size);
+}
+
+void MMKV::updateLastCheckedCRC(uint32_t crcDigest, size_t size) {
+    if (!m_metaFile->isFileValid()) {
+           return;
+    }
+    auto updateInfo = [&](uint32_t crc, size_t lastSize) -> void {
+        m_metaInfo->m_lastCheckedCRCMetaInfo.lastCRCDigest = crc;
+        m_metaInfo->m_lastCheckedCRCMetaInfo.lastActualSize = static_cast<uint32_t>(lastSize);
+        m_metaInfo->writeLastCheckedCRCAndActualSizeOnly(m_metaFile->getMemory());
+        MMKVInfo("update last crc [%s] with crc %u size %zu", m_mmapID.c_str(), crc, lastSize);
+    };
+    if (m_enableIncreaseCRC) {
+        updateInfo(crcDigest, size);
+        MMKVInfo("increase crc: update last crc [%s] with crc %u size %zu", m_mmapID.c_str(), crcDigest, size);
+    } else {
+        // form increase crc to complete crc, clean last value
+        auto info = m_metaInfo->m_lastCheckedCRCMetaInfo;
+        if (info.lastCRCDigest > 0 || info.lastActualSize > 0) {
+            updateInfo(0, 0);
+            MMKVInfo("total crc:[%s] reset lastCheckedInfo", m_mmapID.c_str());
+        }
+    }
 }
 
 bool MMKV::writeActualSize(size_t size, uint32_t crcDigest, const void *iv, bool increaseSequence) {
@@ -1237,7 +1262,7 @@ void MMKV::clearAll() {
     writeActualSize(0, 0, nullptr, IncreaseSequence);
 #endif
     m_metaFile->msync(MMKV_SYNC);
-
+    updateLastCheckedCRC(0, 0);
     clearMemoryCache();
     loadFromFile();
 }

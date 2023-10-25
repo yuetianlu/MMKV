@@ -91,7 +91,7 @@ class MMKV {
 
     bool m_enableKeyExpire = false;
     uint32_t m_expiredInSeconds = ExpireNever;
-
+    bool m_enableIncreaseCRC = false;
 #ifdef MMKV_APPLE
     using MMKVKey_t = NSString *__unsafe_unretained;
     static bool isKeyEmpty(MMKVKey_t key) { return key.length <= 0; }
@@ -119,10 +119,11 @@ class MMKV {
     bool isFileValid();
 
     bool checkFileCRCValid(size_t actualSize, uint32_t crcDigest);
-
+    bool checkFileIncreaseCRCValid(uint32_t crcDigest, size_t actualSize);
     void recaculateCRCDigestWithIV(const void *iv);
-
+    
     void updateCRCDigest(const uint8_t *ptr, size_t length);
+    void updateLastCheckedCRC(uint32_t crcDigest, size_t size);
 
     size_t readActualSize();
 
@@ -422,6 +423,7 @@ public:
     // Note: Don't use this to check the existence of the instance, the return value is undefined if the file was never created.
     static bool isFileValid(const std::string &mmapID, MMKVPath_t *relatePath = nullptr);
 
+    static void setEnableIncreaseCRC(bool enable);
     // just forbid it for possibly misuse
     explicit MMKV(const MMKV &other) = delete;
     MMKV &operator=(const MMKV &other) = delete;
